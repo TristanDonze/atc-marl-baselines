@@ -1,0 +1,3 @@
+[submodule "gym-air-traffic"]
+	path = gym-air-traffic
+	url = https://github.com/TristanDonze/gym-air-traffic.git
