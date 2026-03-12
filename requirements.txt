@@ -1,0 +1,6 @@
+numpy
+torch
+-e ./gym-air-traffic
+stable-baselines3
+SuperSuit
+tensorboard
