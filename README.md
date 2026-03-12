@@ -18,7 +18,7 @@ This repository is dedicated to the development and evaluation of Multi-Agent Re
 Since the environment is a submodule, you must clone the repository with the `--recursive` flag to automatically fetch the environment code.
 
 ```bash
-git clone --recursive https://github.com/YourUsername/atc-marl-baselines.git
+git clone --recursive https://github.com/TristanDonze/atc-marl-baselines.git
 cd atc-marl-baselines
 
 ```
