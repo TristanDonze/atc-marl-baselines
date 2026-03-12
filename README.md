@@ -23,16 +23,7 @@ cd atc-marl-baselines
 
 ```
 
-*Note: If you have already cloned the repo without the flag, run:*
-
-```bash
-git submodule update --init --recursive
-
-```
-
 ### 2. Setup the Environment
-
-We recommend using a virtual environment (venv or conda). Once your environment is active, install the dependencies and the air traffic simulation in **editable mode**.
 
 ```bash
 # Install the environment as a local editable package
