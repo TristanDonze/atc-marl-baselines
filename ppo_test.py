@@ -45,7 +45,7 @@ def main():
         policy_kwargs=dict(net_arch=[128, 128])
     )
 
-    learn = False
+    learn = True
     if learn:
         print("Starting training...")
 
