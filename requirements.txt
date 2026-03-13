@@ -4,3 +4,4 @@ torch
 stable-baselines3
 SuperSuit
 tensorboard
+-e ./agents/mpc/mpc.pytorch
