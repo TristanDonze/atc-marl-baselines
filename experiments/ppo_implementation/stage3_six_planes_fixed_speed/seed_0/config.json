@@ -1,0 +1,17 @@
+{
+  "stage": {
+    "name": "stage3_six_planes_fixed_speed",
+    "max_planes": 10,
+    "spawn_planes": 6,
+    "num_envs": 8,
+    "enable_acceleration": true,
+    "acceleration_scale": 0.0,
+    "enable_wind": false,
+    "include_wind_in_obs": false,
+    "total_timesteps": 4000000
+  },
+  "seed": 0,
+  "num_envs": 8,
+  "ppo": {},
+  "warm_start": "experiments/ppo_implementation/stage2_four_planes_fixed_speed/seed_0/checkpoints/final_model.pth"
+}

@@ -7,4 +7,3 @@ training_logs/
 models/
 gym_air_traffic.egg-info/
 .aim
-experiments/
