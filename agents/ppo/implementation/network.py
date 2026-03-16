@@ -98,6 +98,40 @@ class AirTrafficActorCriticNetwork(nn.Module):
             nn.Linear(256, 1)
         )
 
+        self._initialize_weights()
+
+    @staticmethod
+    def _init_linear(layer, gain):
+        nn.init.orthogonal_(layer.weight, gain=gain)
+        nn.init.constant_(layer.bias, 0.0)
+
+    def _initialize_weights(self):
+        relu_gain = nn.init.calculate_gain("relu")
+
+        extractor_layers = (
+            self.extractor.self_encoder[0],
+            self.extractor.self_encoder[2],
+            self.extractor.neighbor_encoder[0],
+            self.extractor.neighbor_encoder[2],
+            self.extractor.fusion[0],
+            self.extractor.fusion[2],
+        )
+        actor_hidden_layers = (
+            self.actor[0],
+            self.actor[2],
+        )
+        critic_hidden_layers = (
+            self.critic[0],
+            self.critic[2],
+            self.critic[4],
+        )
+
+        for layer in (*extractor_layers, *actor_hidden_layers, *critic_hidden_layers):
+            self._init_linear(layer, gain=relu_gain)
+
+        self._init_linear(self.actor[4], gain=0.01)
+        self._init_linear(self.critic[6], gain=1.0)
+
     def get_action_distribution_params(self, state):
         features = self.extractor(state)
         action_mean_or_logits = self.actor(features)

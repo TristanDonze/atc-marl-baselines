@@ -9,6 +9,7 @@ def build_stage_paths(root, stage, seed):
         "video_dir": run_dir / "videos",
         "config_path": run_dir / "config.json",
         "final_model": run_dir / "checkpoints" / "final_model.pth",
+        "final_optimizer": run_dir / "checkpoints" / "final_optimizer.pth",
         "final_vecnormalize": run_dir / "checkpoints" / "final_vec_normalize.pkl",
     }
     for key, value in paths.items():

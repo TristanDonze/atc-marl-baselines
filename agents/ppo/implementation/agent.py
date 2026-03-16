@@ -56,6 +56,10 @@ class ProximalPolicyOptimizationAgent:
 
         self.current_ep_rewards = np.zeros(self.num_envs)
         self.completed_ep_rewards = []
+        self.last_dones = np.zeros(self.num_envs, dtype=np.float32)
+
+    def _track_metric(self, name, value):
+        self.run.track(value, name=f"{self.stage_name}/{name}", step=self.total_env_steps)
 
     @property
     def model(self):
@@ -102,15 +106,21 @@ class ProximalPolicyOptimizationAgent:
         for _ in range(self.rollout_steps):
             state_t = torch.tensor(self.current_state, dtype=torch.float32).to(self.device)
             action, log_prob, value = self.sample_action(state_t)
-            
-            obs, rewards, dones, infos = self.env.step(action)
-            
+
+            env_action = action
+            if self.action_type == "continuous":
+                env_action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+
+            obs, rewards, dones, infos = self.env.step(env_action)
+            raw_rewards = np.asarray(getattr(self.env, "last_raw_rewards", rewards), dtype=np.float32)
+
             self.rollout_buffer.add(self.current_state, action, rewards, dones, value, log_prob)
             self.current_state = obs
+            self.last_dones = np.asarray(dones, dtype=np.float32)
             self.total_env_steps += self.num_envs
 
             for i, done in enumerate(dones):
-                self.current_ep_rewards[i] += float(rewards[i])
+                self.current_ep_rewards[i] += float(raw_rewards[i])
                 
                 if done:
                     self.completed_ep_rewards.append(self.current_ep_rewards[i])
@@ -131,28 +141,29 @@ class ProximalPolicyOptimizationAgent:
                                 rollout_gate_pass_agents += 1
 
         if rollout_completed_agents > 0:
-            self.run.track(rollout_collision_agents / rollout_completed_agents, name="traffic/collision_rate_rollout", step=self.total_env_steps)
-            self.run.track(rollout_gate_pass_agents / rollout_completed_agents, name="traffic/gate_pass_rate_rollout", step=self.total_env_steps)
-        self.run.track(rollout_completed_agents, name="traffic/completed_agents_rollout", step=self.total_env_steps)
+            self._track_metric("traffic/collision_rate_rollout", rollout_collision_agents / rollout_completed_agents)
+            self._track_metric("traffic/gate_pass_rate_rollout", rollout_gate_pass_agents / rollout_completed_agents)
+        self._track_metric("traffic/completed_agents_rollout", rollout_completed_agents)
 
         if len(self.completed_ep_rewards) > 0:
             avg_reward = float(np.mean(self.completed_ep_rewards))
-            self.run.track(avg_reward, name="reward/train_avg_per_episode", step=self.total_env_steps)
+            self._track_metric("reward/train_avg_per_episode", avg_reward)
             self.completed_ep_rewards.clear()
 
     @torch.no_grad()
     def compute_gae(self, rewards, dones, values, next_value, next_done):
         advantages = torch.zeros_like(rewards).to(self.device)
-        last_gae_lam = 0
+        last_gae_lam = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
         for t in reversed(range(self.rollout_steps)):
             if t == self.rollout_steps - 1:
                 next_non_terminal = 1.0 - next_done
                 next_values = next_value
             else:
-                next_non_terminal = 1.0 - dones[t + 1]
+                next_non_terminal = 1.0 - dones[t]
                 next_values = values[t + 1]
             delta = rewards[t] + GAMMA * next_values * next_non_terminal - values[t]
-            advantages[t] = last_gae_lam = delta + GAMMA * GAE_LAMBDA * next_non_terminal * last_gae_lam
+            last_gae_lam = delta + GAMMA * GAE_LAMBDA * next_non_terminal * last_gae_lam
+            advantages[t] = last_gae_lam
         returns = advantages + values
         return returns, advantages
 
@@ -169,7 +180,7 @@ class ProximalPolicyOptimizationAgent:
             with torch.no_grad():
                 next_state_t = torch.tensor(self.current_state, dtype=torch.float32).to(self.device)
                 next_value = self.ac_nn.get_state_value(next_state_t).squeeze(-1)
-                next_done = torch.tensor(np.zeros(self.num_envs), dtype=torch.float32).to(self.device)
+                next_done = torch.tensor(self.last_dones, dtype=torch.float32).to(self.device)
 
             returns, advantages = self.compute_gae(rewards, dones, values, next_value, next_done)
             
@@ -181,9 +192,6 @@ class ProximalPolicyOptimizationAgent:
             b_advantages = advantages.view(-1)
             b_returns = returns.view(-1)
             b_logp_old = logp_old.view(-1)
-            b_values = values.view(-1)
-
-            b_advantages = (b_advantages - b_advantages.mean()) / (b_advantages.std() + 1e-8)
 
             n_samples = b_states.shape[0]
             avg_loss_actor, avg_loss_critic, avg_entropy, avg_kl, avg_clipfrac = 0.0, 0.0, 0.0, 0.0, 0.0
@@ -197,19 +205,19 @@ class ProximalPolicyOptimizationAgent:
                     mb_adv = b_advantages[mb_idx]
                     mb_ret = b_returns[mb_idx]
                     mb_logp_old = b_logp_old[mb_idx]
-                    mb_v_old = b_values[mb_idx]
+
+                    if mb_adv.numel() > 1:
+                        mb_adv = (mb_adv - mb_adv.mean()) / (mb_adv.std() + 1e-8)
 
                     logp_new, entropy, v_pred = self.evaluate_actions(mb_states, mb_actions)
 
-                    prob_ratio = torch.exp(logp_new - mb_logp_old)
+                    log_ratio = logp_new - mb_logp_old
+                    prob_ratio = torch.exp(log_ratio)
                     surrogate1 = prob_ratio * mb_adv
                     surrogate2 = torch.clamp(prob_ratio, 1.0 - PPO_CLIP_EPS, 1.0 + PPO_CLIP_EPS) * mb_adv
                     loss_actor = -torch.mean(torch.min(surrogate1, surrogate2))
 
-                    v_pred_clipped = mb_v_old + torch.clamp(v_pred - mb_v_old, -PPO_CLIP_EPS, PPO_CLIP_EPS)
-                    value_loss_unclipped = (v_pred - mb_ret).pow(2)
-                    value_loss_clipped = (v_pred_clipped - mb_ret).pow(2)
-                    loss_critic = 0.5 * torch.mean(torch.max(value_loss_unclipped, value_loss_clipped))
+                    loss_critic = torch.mean((mb_ret - v_pred).pow(2))
 
                     ent = entropy.mean()
                     loss = loss_actor + CRITIC_LOSS_WEIGHT * loss_critic - ENTROPY_TERM_WEIGHT * ent
@@ -220,7 +228,7 @@ class ProximalPolicyOptimizationAgent:
                     self.optimizer.step()
 
                     with torch.no_grad():
-                        kl = torch.mean(mb_logp_old - logp_new)
+                        kl = torch.mean((prob_ratio - 1.0) - log_ratio)
                         clipfrac = torch.mean((torch.abs(prob_ratio - 1.0) > PPO_CLIP_EPS).float())
 
                     avg_loss_actor += loss_actor.item()
@@ -230,18 +238,18 @@ class ProximalPolicyOptimizationAgent:
                     avg_clipfrac += clipfrac.item()
                     num_minibatches_processed += 1
 
-                    if TARGET_KL and kl.item() > TARGET_KL: 
+                    if TARGET_KL and kl.item() > 1.5 * TARGET_KL:
                         early_stop = True
                         break
                 if early_stop: 
                     break
 
             if num_minibatches_processed > 0:
-                self.run.track(avg_loss_actor / num_minibatches_processed, name="loss/actor_clip", step=self.total_env_steps)
-                self.run.track(avg_loss_critic / num_minibatches_processed, name="loss/value_clip", step=self.total_env_steps)
-                self.run.track(avg_entropy / num_minibatches_processed, name="entropy", step=self.total_env_steps)
-                self.run.track(avg_kl / num_minibatches_processed, name="kl", step=self.total_env_steps)
-                self.run.track(avg_clipfrac / num_minibatches_processed, name="clipfrac", step=self.total_env_steps)
+                self._track_metric("loss/actor_clip", avg_loss_actor / num_minibatches_processed)
+                self._track_metric("loss/value", avg_loss_critic / num_minibatches_processed)
+                self._track_metric("entropy", avg_entropy / num_minibatches_processed)
+                self._track_metric("kl", avg_kl / num_minibatches_processed)
+                self._track_metric("clipfrac", avg_clipfrac / num_minibatches_processed)
             
             self.rollout_buffer.clear()
             self.train_done += 1

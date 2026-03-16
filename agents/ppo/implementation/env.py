@@ -43,15 +43,18 @@ class VecNormalizeWrapper:
         self.obs_rms = RunningMeanStd(shape=self.observation_space.shape)
         self.ret_rms = RunningMeanStd(shape=())
         self.returns = np.zeros(self.num_envs)
+        self.last_raw_rewards = np.zeros(self.num_envs, dtype=np.float32)
 
     def reset(self, seed=None):
         obs, infos = self.venv.reset(seed=seed)
         self.returns = np.zeros(self.num_envs)
+        self.last_raw_rewards = np.zeros(self.num_envs, dtype=np.float32)
         return self.normalize_obs(obs), infos
 
     def step(self, actions):
         obs, rewards, terminations, truncations, infos = self.venv.step(actions)
         dones = np.logical_or(terminations, truncations)
+        self.last_raw_rewards = np.asarray(rewards, dtype=np.float32)
         self.returns = self.returns * self.gamma + rewards
         normalized_rewards = self.normalize_reward(rewards)
         self.returns[dones] = 0.0
