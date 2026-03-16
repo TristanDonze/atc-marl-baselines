@@ -54,6 +54,9 @@ class ProximalPolicyOptimizationAgent:
         self.optimizer = torch.optim.Adam(self.ac_nn.parameters(), lr=LR, eps=1e-5)
         self.rollout_buffer = RolloutBuffer(self.rollout_steps, self.num_envs, self.device)
 
+        self.current_ep_rewards = np.zeros(self.num_envs)
+        self.completed_ep_rewards = []
+
     @property
     def model(self):
         return self.ac_nn
@@ -107,7 +110,12 @@ class ProximalPolicyOptimizationAgent:
             self.total_env_steps += self.num_envs
 
             for i, done in enumerate(dones):
+                self.current_ep_rewards[i] += float(rewards[i])
+                
                 if done:
+                    self.completed_ep_rewards.append(self.current_ep_rewards[i])
+                    self.current_ep_rewards[i] = 0.0
+                    
                     rollout_completed_agents += 1
                     if isinstance(infos, tuple) and len(infos) > i and isinstance(infos[i], dict):
                         if infos[i].get("termination_reason") == "collision":
@@ -126,6 +134,11 @@ class ProximalPolicyOptimizationAgent:
             self.run.track(rollout_collision_agents / rollout_completed_agents, name="traffic/collision_rate_rollout", step=self.total_env_steps)
             self.run.track(rollout_gate_pass_agents / rollout_completed_agents, name="traffic/gate_pass_rate_rollout", step=self.total_env_steps)
         self.run.track(rollout_completed_agents, name="traffic/completed_agents_rollout", step=self.total_env_steps)
+
+        if len(self.completed_ep_rewards) > 0:
+            avg_reward = float(np.mean(self.completed_ep_rewards))
+            self.run.track(avg_reward, name="reward/train_avg_per_episode", step=self.total_env_steps)
+            self.completed_ep_rewards.clear()
 
     @torch.no_grad()
     def compute_gae(self, rewards, dones, values, next_value, next_done):
