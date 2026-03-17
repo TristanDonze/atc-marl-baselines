@@ -11,7 +11,7 @@ from agents.ppo.implementation.utils import build_stage_paths, save_stage_config
 from agents.ppo.implementation.agent import ProximalPolicyOptimizationAgent
 
 EXPERIMENT_ROOT = Path("experiments/ppo_implementation")
-DEFAULT_SEEDS = (0, 1, 2)
+DEFAULT_SEEDS = (0, 42, 67)
 DEFAULT_NUM_ENVS = None
 
 CURRICULUM = (
@@ -170,7 +170,7 @@ def train_curriculum(stages, seeds, artifact_root, num_envs_override):
         warm_start_normalizer = None
         previous_stage = None
         
-        run_aim = aim.Run(experiment=f"ppo_curriculum_seed_{seed}")
+        run_aim = aim.Run(experiment=f"night_ppo_curriculum_seed_{seed}")
         
         for stage in stages:
             stage_num_envs = num_envs_override if num_envs_override is not None else stage.num_envs
